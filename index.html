@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CareNear: find hospitals, beds and doctors</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<style>
+  body{font-family:system-ui,sans-serif;background:#faf7f1;color:#1a2320;margin:0;}
+  header{padding:20px;background:#1b4b43;color:#fff;}
+  header h1{margin:0 0 4px;font-size:1.5rem;}
+  header p{margin:0;opacity:.85;font-size:.9rem;}
+  .wrap{max-width:800px;margin:0 auto;padding:16px;}
+  input{width:100%;padding:12px;font-size:1rem;border:1px solid #d9d0be;border-radius:8px;box-sizing:border-box;}
+  .chips{margin:12px 0;display:flex;gap:8px;flex-wrap:wrap;}
+  .chip{padding:6px 14px;border:1px solid #d9d0be;border-radius:999px;background:#f1ece1;cursor:pointer;font-size:.85rem;}
+  .chip.active{background:#1b4b43;color:#fff;border-color:#1b4b43;}
+  .card{background:#f1ece1;border:1px solid #d9d0be;border-radius:10px;padding:14px;margin-bottom:10px;}
+  .card h3{margin:0 0 4px;}
+  .muted{color:#5e6863;font-size:.88rem;}
+  .tag{display:inline-block;font-size:.75rem;padding:3px 8px;border:1px solid #d9d0be;border-radius:6px;margin:8px 6px 0 0;background:#faf7f1;}
+  .error{background:#fde8e5;border:1px solid #c9483a;padding:14px;border-radius:8px;}
+
+  /* Beds section */
+  .beds{display:flex;gap:8px;margin-top:12px;}
+  .bed{flex:1;background:#faf7f1;border:1px solid #d9d0be;border-radius:8px;padding:8px;text-align:center;}
+  .bed b{display:block;font-size:1.3rem;}
+  .bed span{font-size:.75rem;color:#5e6863;}
+  .bed.zero b{color:#c9483a;}            /* 0 beds = red */
+  .fresh{margin-top:8px;font-size:.8rem;}
+  .fresh.ok{color:#1b4b43;}              /* fresh data = green */
+  .fresh.old{color:#b36b00;}             /* older than 2 hours = orange warning */
+  .fresh.never{color:#5e6863;}           /* never updated = grey */
+
+  /* "I need a bed" filter */
+  .needrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;}
+  .needrow .chips{margin:0;}
+  .needlabel{font-size:.88rem;font-weight:600;color:#1b4b43;}
+  .group-title{margin:20px 0 4px;font-size:1.05rem;color:#1b4b43;}
+  .group-note{margin:0 0 10px;font-size:.85rem;color:#5e6863;}
+  .notice{background:#fff7e6;border:1px solid #e0b25c;border-radius:8px;padding:10px;font-size:.85rem;margin-top:12px;}
+
+  /* Doctors section */
+  .docbtn{margin-top:4px;padding:8px 14px;border:1px solid #1b4b43;border-radius:8px;background:transparent;color:#1b4b43;font-size:.88rem;cursor:pointer;}
+  .docbtn:hover{background:#1b4b43;color:#fff;}
+  .doctors{margin-top:10px;}
+  .doc{background:#faf7f1;border:1px solid #d9d0be;border-radius:8px;padding:10px;margin-top:8px;}
+  .doc b{display:block;}
+  .doc .spec{color:#5e6863;font-size:.82rem;}
+  .doc .status{margin-top:6px;font-size:.85rem;font-weight:500;}
+  .status.today{color:#1b4b43;}          /* OPD today = green */
+  .status.over{color:#b36b00;}           /* OPD finished for today = orange */
+  .status.off{color:#5e6863;}            /* no OPD today = grey */
+  .status.leave{color:#c9483a;}          /* on leave = red */
+  .docnote{font-size:.78rem;color:#5e6863;margin-top:8px;}
+
+  /* Appointment request form */
+  .reqbtn{margin-top:8px;padding:6px 12px;border:none;border-radius:8px;background:#1b4b43;color:#fff;font-size:.82rem;cursor:pointer;}
+  .reqbtn:disabled{opacity:.6;cursor:default;}
+  .reqform{margin-top:10px;padding:12px;background:#f1ece1;border:1px solid #d9d0be;border-radius:8px;}
+  .reqform label{display:block;font-size:.8rem;color:#5e6863;margin:8px 0 3px;}
+  .reqform input{padding:9px;font-size:.95rem;}
+  .reqmsg{margin-top:8px;padding:8px;border-radius:8px;font-size:.85rem;display:none;}
+  .reqmsg.err{display:block;background:#fde8e5;border:1px solid #c9483a;}
+  .reqmsg.ok{display:block;background:#e3f1ec;border:1px solid #1b4b43;}
+
+  /* View switch (List / Map) and Near me */
+  .viewbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:14px 0 10px;}
+  .seg{display:inline-flex;border:1px solid #1b4b43;border-radius:8px;overflow:hidden;}
+  .segbtn{padding:8px 18px;border:none;background:#fff;color:#1b4b43;font-size:.9rem;cursor:pointer;}
+  .segbtn.active{background:#1b4b43;color:#fff;}
+  .nearbtn{padding:8px 14px;border:1px solid #1b4b43;border-radius:8px;background:#fff;color:#1b4b43;font-size:.9rem;cursor:pointer;}
+  .nearbtn.on{background:#e3f1ec;font-weight:600;}
+  .nearnote{font-size:.82rem;color:#5e6863;}
+  .kmtag{color:#1b4b43;font-weight:600;}
+
+  /* Map */
+  #map{height:430px;border:1px solid #d9d0be;border-radius:10px;z-index:0;}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:.8rem;color:#5e6863;margin-top:8px;}
+  .legend span{display:inline-flex;align-items:center;gap:5px;}
+  .legend i{display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px #999;}
+  .pin{width:20px;height:20px;border-radius:50%;border:3px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.55);box-sizing:border-box;}
+  .pin.fresh,.legend i.fresh{background:#1b4b43;}
+  .pin.old,.legend i.old{background:#e08a00;}
+  .pin.never,.legend i.never{background:#8a8f8c;}
+  .pin.hit{box-shadow:0 0 0 3px #1b4b43,0 1px 5px rgba(0,0,0,.55);}   /* ring = has the bed you need */
+  .pin.dim{opacity:.4;}                                                /* faded = no reported bed of that type */
+  .you{width:16px;height:16px;border-radius:50%;background:#2563eb;border:3px solid #fff;box-shadow:0 0 0 3px rgba(37,99,235,.35);box-sizing:border-box;}
+  .leaflet-popup-content{font-family:system-ui,sans-serif;font-size:.9rem;}
+  .pop b{display:block;font-size:1rem;margin-bottom:2px;}
+  .pop div{margin-top:4px;}
+  .popact{display:flex;gap:14px;font-weight:600;}
+  .popact a{color:#1b4b43;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>CareNear</h1>
+  <p>Find hospitals, bed availability and doctors in your city</p>
+</header>
+
+<div class="wrap">
+  <input id="search" placeholder="Search by hospital name or area...">
+  <div class="needrow">
+    <span class="needlabel">I need a bed:</span>
+    <div class="chips" id="needChips"></div>
+  </div>
+  <div class="chips" id="chips"></div>
+  <div class="viewbar">
+    <div class="seg" role="group" aria-label="Choose view">
+      <button class="segbtn active" id="viewList" aria-pressed="true">List</button>
+      <button class="segbtn" id="viewMap" aria-pressed="false">Map</button>
+    </div>
+    <button class="nearbtn" id="nearBtn">📍 Near me</button>
+    <span class="nearnote" id="nearNote"></span>
+  </div>
+
+  <div id="mapWrap" style="display:none;">
+    <div id="map"></div>
+    <div class="legend">
+      <span><i class="fresh"></i> Beds updated recently</span>
+      <span><i class="old"></i> Data may be outdated</span>
+      <span><i class="never"></i> Beds not reported</span>
+      <span><i style="background:#2563eb"></i> You</span>
+    </div>
+    <p class="muted" id="mapNote"></p>
+  </div>
+
+  <div id="list"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+// Address of the backend. Change this if you run it on a different port.
+// If this page is opened from the backend (http://127.0.0.1:8000/app) we use that same address.
+const API = location.protocol.startsWith("http") ? location.origin : "http://127.0.0.1:8000";
+
+let selectedSpecialty = "";   // which filter chip is selected right now
+let allSpecialties = [];      // used to build the filter chips
+
+// Works out how long ago the beds were updated.
+// The backend sends a time like "2026-10-08T05:00:58+00:00";
+// we subtract it from the current time to get minutes.
+function freshness(lastUpdated) {
+  if (!lastUpdated) {
+    return { text: "Not updated yet. Please call to confirm.", cls: "never" };
+  }
+  const minutes = Math.floor((Date.now() - new Date(lastUpdated)) / 60000);
+
+  let text;
+  if (minutes < 1) text = "Updated just now";
+  else if (minutes < 60) text = `Updated ${minutes} min ago`;
+  else if (minutes < 1440) text = `Updated ${Math.floor(minutes / 60)} hr ago`;
+  else text = `Updated ${Math.floor(minutes / 1440)} day(s) ago`;
+
+  // 120 minutes = 2 hours. Anything older gets a warning.
+  if (minutes > 120) return { text: text + " (may be outdated)", cls: "old" };
+  return { text: text, cls: "ok" };
+}
+
+function bedBox(label, count) {
+  return `<div class="bed ${count === 0 ? "zero" : ""}"><b>${count}</b><span>${label}</span></div>`;
+}
+
+// Makes text safe before putting it into the page
+function esc(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// ---------- "I need a bed" filter ----------
+const BED_TYPES = [
+  { key: "",           label: "Any" },
+  { key: "general",    label: "General bed" },
+  { key: "icu",        label: "ICU bed" },
+  { key: "ventilator", label: "Ventilator" },
+];
+let neededBed = "";   // "" means no bed filter
+
+function drawNeedChips() {
+  const box = document.getElementById("needChips");
+  box.innerHTML = BED_TYPES.map(b =>
+    `<span class="chip ${b.key === neededBed ? "active" : ""}" data-b="${b.key}">${b.label}</span>`
+  ).join("");
+  box.querySelectorAll(".chip").forEach(chip => {
+    chip.onclick = () => { neededBed = chip.dataset.b; drawNeedChips(); loadHospitals(); };
+  });
+}
+
+// HTML for one hospital card
+function cardHtml(h) {
+  const f = freshness(h.beds.last_updated);
+  // If beds were never updated, show "–" instead of 0,
+  // because 0 would wrongly suggest there are no beds.
+  const neverUpdated = !h.beds.last_updated;
+  const show = (label, n) => neverUpdated
+    ? `<div class="bed"><b>–</b><span>${label}</span></div>`
+    : bedBox(label, n);
+
+  return `
+    <div class="card">
+      <h3>${esc(h.name)}</h3>
+      <div class="muted">${esc(h.area)} · ${esc(h.address)}${h._km != null ? ` · <span class="kmtag">${kmText(h._km)}</span>` : ""}</div>
+      <div>${h.specialties.map(s => `<span class="tag">${esc(s)}</span>`).join("")}</div>
+
+      <div class="beds">
+        ${show("General beds", h.beds.general)}
+        ${show("ICU beds", h.beds.icu)}
+        ${show("Ventilators", h.beds.ventilator)}
+      </div>
+      <div class="fresh ${f.cls}">🕒 ${f.text}</div>
+
+      <button class="docbtn" onclick="toggleDoctors(${h.id})">👨‍⚕️ View doctors</button>
+      <div class="doctors" id="doctors-${h.id}" data-open="0"></div>
+
+      <p class="muted">📞 <a href="tel:${esc(h.phone)}">${esc(h.phone)}</a></p>
+    </div>`;
+}
+
+// Shows the list. With a bed filter on, hospitals are split into two groups
+// instead of hiding some of them: a hospital that never reported its beds
+// might still have one, so it must stay visible.
+function renderList(hospitals, list) {
+  if (hospitals.length === 0) {
+    list.innerHTML = "<p class='muted'>No hospitals found.</p>";
+    return;
+  }
+  // With "Near me" on, the nearest hospitals come first
+  const ordered = userLoc ? [...hospitals].sort(byDistance) : hospitals;
+
+  if (!neededBed) {
+    list.innerHTML = ordered.map(cardHtml).join("");
+    return;
+  }
+
+  const label = BED_TYPES.find(b => b.key === neededBed).label.toLowerCase();
+
+  // Group 1: reported at least one free bed of this type.
+  // Nearest first when "Near me" is on, otherwise most recently updated first.
+  const available = ordered.filter(h => h.beds.last_updated && h.beds[neededBed] > 0);
+  if (!userLoc) available.sort((a, b) => new Date(b.beds.last_updated) - new Date(a.beds.last_updated));
+  // Group 2: everything else (reported none, or never reported)
+  const others = ordered.filter(h => !available.includes(h));
+
+  let html = `<div class="notice">Bed numbers are reported by hospitals and can be out of date.
+    In an emergency, call <b>112</b> (or <b>108</b> for an ambulance) instead of searching here.</div>`;
+
+  html += `<h2 class="group-title">Reported available (${available.length})</h2>`;
+  html += available.length
+    ? available.map(cardHtml).join("")
+    : `<p class="group-note">No hospital here has reported a free ${label} right now.</p>`;
+
+  if (others.length) {
+    html += `<h2 class="group-title">No beds reported, or status unknown (${others.length})</h2>
+      <p class="group-note">These hospitals may still have a ${label}. Please call to confirm.</p>`;
+    html += others.map(cardHtml).join("");
+  }
+  list.innerHTML = html;
+}
+
+// ---------- Map view and "Near me" ----------
+let viewMode = "list";
+let lastHospitals = [];    // results of the latest search, so switching views needs no new request
+let map = null, markerLayer = null;
+let userLoc = null;        // { lat, lng } while "Near me" is on. It stays in this browser and is never sent anywhere.
+const PIN_CLASS = { ok: "fresh", old: "old", never: "never" };   // freshness() result -> pin colour
+
+// Distance in km between two points on Earth (haversine formula)
+function distanceKm(a, b) {
+  const rad = x => x * Math.PI / 180;
+  const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 6371 * 2 * Math.asin(Math.sqrt(h));
+}
+function kmText(km) {
+  return km < 1 ? `${Math.round(km * 1000)} m away` : `${km.toFixed(1)} km away`;
+}
+const hasLocation = h => h.latitude != null && h.longitude != null;
+const byDistance = (a, b) => (a._km ?? Infinity) - (b._km ?? Infinity);   // no location = last
+
+function addDistances(hospitals) {
+  hospitals.forEach(h => {
+    h._km = (userLoc && hasLocation(h)) ? distanceKm(userLoc, { lat: h.latitude, lng: h.longitude }) : null;
+  });
+}
+
+// The little window that opens when you tap a pin
+function popupHtml(h) {
+  const f = freshness(h.beds.last_updated);
+  const beds = h.beds.last_updated
+    ? `General ${h.beds.general} · ICU ${h.beds.icu} · Ventilators ${h.beds.ventilator}`
+    : "Beds: not reported yet";
+  return `<div class="pop">
+    <b>${esc(h.name)}</b>
+    <div class="muted">${esc(h.area)}${h._km != null ? ` · <span class="kmtag">${kmText(h._km)}</span>` : ""}</div>
+    <div>${beds}</div>
+    <div class="fresh ${f.cls}">🕒 ${f.text}</div>
+    <div class="popact">
+      <a href="tel:${esc(h.phone)}">📞 Call</a>
+      <a href="https://www.google.com/maps/dir/?api=1&destination=${h.latitude},${h.longitude}" target="_blank" rel="noopener">Directions</a>
+    </div>
+  </div>`;
+}
+
+function renderMap(hospitals) {
+  const mapBox = document.getElementById("map");
+  const note = document.getElementById("mapNote");
+
+  // If the map library could not load (for example no internet), say so. The List view still works.
+  if (typeof L === "undefined") {
+    mapBox.innerHTML = "<div class='error'>The map could not be loaded. Please check your internet connection. The List view still works.</div>";
+    note.textContent = "";
+    return;
+  }
+
+  if (!map) {
+    map = L.map("map");
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap contributors",
+    }).addTo(map);
+    markerLayer = L.layerGroup().addTo(map);
+  }
+  map.invalidateSize();       // the map was hidden until now, so it must re-measure its box
+  markerLayer.clearLayers();
+
+  const located = hospitals.filter(hasLocation);
+  const missing = hospitals.length - located.length;
+
+  // With a bed filter on: pins with a free bed get a ring, the others fade (but stay visible)
+  const hits = neededBed
+    ? new Set(hospitals.filter(h => h.beds.last_updated && h.beds[neededBed] > 0).map(h => h.id))
+    : null;
+
+  located.forEach(h => {
+    const cls = PIN_CLASS[freshness(h.beds.last_updated).cls] + (hits ? (hits.has(h.id) ? " hit" : " dim") : "");
+    L.marker([h.latitude, h.longitude], {
+      icon: L.divIcon({ className: "", html: `<div class="pin ${cls}"></div>`, iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -10] }),
+      title: h.name,
+    }).bindPopup(popupHtml(h)).addTo(markerLayer);
+  });
+
+  if (userLoc) {
+    L.marker([userLoc.lat, userLoc.lng], {
+      icon: L.divIcon({ className: "", html: "<div class='you'></div>", iconSize: [16, 16], iconAnchor: [8, 8] }),
+      interactive: false, keyboard: false, zIndexOffset: 1000,
+    }).addTo(markerLayer);
+  }
+
+  // Zoom to fit: you plus the 3 nearest hospitals, or all hospitals shown
+  let points = located.map(h => [h.latitude, h.longitude]);
+  if (userLoc) {
+    points = [[userLoc.lat, userLoc.lng], ...[...located].sort(byDistance).slice(0, 3).map(h => [h.latitude, h.longitude])];
+  }
+  if (points.length) map.fitBounds(L.latLngBounds(points).pad(0.25), { maxZoom: 15 });
+  else map.setView([22.9734, 78.6569], 5);   // whole of India
+
+  note.textContent = hospitals.length === 0
+    ? "No hospitals match your search."
+    : `${located.length} hospital(s) shown on the map` +
+      (missing ? ` · ${missing} without a location yet (see the List view)` : "");
+}
+
+function renderCurrent() {
+  addDistances(lastHospitals);
+  if (viewMode === "map") renderMap(lastHospitals);
+  else renderList(lastHospitals, document.getElementById("list"));
+}
+
+function setView(mode) {
+  viewMode = mode;
+  for (const [id, m] of [["viewList", "list"], ["viewMap", "map"]]) {
+    document.getElementById(id).classList.toggle("active", mode === m);
+    document.getElementById(id).setAttribute("aria-pressed", String(mode === m));
+  }
+  document.getElementById("mapWrap").style.display = mode === "map" ? "block" : "none";
+  document.getElementById("list").style.display = mode === "list" ? "block" : "none";
+  renderCurrent();
+}
+
+// "Near me": asks the browser for your location (it will ask for your permission).
+function updateNearUi() {
+  const btn = document.getElementById("nearBtn");
+  btn.classList.toggle("on", !!userLoc);
+  btn.textContent = userLoc ? "📍 Near me: on (tap to turn off)" : "📍 Near me";
+  document.getElementById("nearNote").textContent = userLoc ? "Nearest first. Your location stays on this device." : "";
+}
+
+function toggleNearMe() {
+  const note = document.getElementById("nearNote");
+  if (userLoc) { userLoc = null; updateNearUi(); renderCurrent(); return; }
+  if (!navigator.geolocation) { note.textContent = "Your browser does not support location."; return; }
+
+  note.textContent = "Finding your location...";
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      userLoc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      updateNearUi();
+      renderCurrent();
+    },
+    err => {
+      note.textContent = err.code === 1
+        ? "Location permission was denied. You can allow it in your browser's site settings."
+        : "Could not get your location. Please try again.";
+    },
+    { timeout: 10000, maximumAge: 60000 }
+  );
+}
+
+async function loadHospitals() {
+  const search = document.getElementById("search").value;
+
+  // Builds a URL like: http://127.0.0.1:8000/hospitals?search=sagar&specialty=ICU
+  const url = new URL(API + "/hospitals");
+  if (search) url.searchParams.set("search", search);
+  if (selectedSpecialty) url.searchParams.set("specialty", selectedSpecialty);
+
+  const list = document.getElementById("list");
+
+  try {
+    const response = await fetch(url);
+    const hospitals = await response.json();
+
+    // First load only: collect all specialties and build the chips
+    if (allSpecialties.length === 0) {
+      allSpecialties = [...new Set(hospitals.flatMap(h => h.specialties))].sort();
+      drawChips();
+    }
+
+    lastHospitals = hospitals;
+    renderCurrent();
+
+  } catch (error) {
+    // Shown if the backend isn't running (switch to List so the message is visible)
+    if (viewMode === "map") setView("list");
+    list.innerHTML = `<div class="error">
+      Could not connect to the backend. Check that
+      <b>uvicorn main:app --reload</b> is running in your terminal.
+    </div>`;
+  }
+}
+
+// ---------- Doctors ----------
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];  // getDay() gives 0 for Sunday
+
+// Converts "14:30" into "2:30 PM"
+function to12h(t) {
+  const [h, m] = t.split(":").map(Number);
+  const ampm = h >= 12 ? "PM" : "AM";
+  return `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${ampm}`;
+}
+
+// Decides what to show for one doctor: on leave / OPD today / OPD over / no OPD today
+function doctorStatus(d) {
+  if (d.on_leave) return { text: "On leave", cls: "leave" };
+
+  const now = new Date();
+  const today = DAY_NAMES[now.getDay()];
+  const hours = `${to12h(d.opd_start)} – ${to12h(d.opd_end)}`;
+
+  if (!d.opd_days.includes(today)) {
+    return { text: `No OPD today · OPD days: ${d.opd_days.join(", ")}`, cls: "off" };
+  }
+
+  // HH:MM strings compare correctly as text, e.g. "09:30" < "14:00"
+  const nowText = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
+  if (nowText > d.opd_end) return { text: `OPD over for today (${hours})`, cls: "over" };
+  return { text: `OPD today, ${hours}`, cls: "today" };
+}
+
+// ---------- Appointment requests ----------
+const doctorsById = {};   // filled when a doctors list is opened
+
+// Turns the backend's error reply into one readable sentence
+function formatError(data) {
+  if (!data) return "Something went wrong. Please try again.";
+  if (typeof data.detail === "string") return data.detail;
+  if (Array.isArray(data.detail)) return data.detail.map(e => e.msg).join("; ");
+  return "Something went wrong. Please try again.";
+}
+
+// Date as YYYY-MM-DD using the device's own calendar (not UTC)
+function ymd(date) {
+  return date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0") + "-" + String(date.getDate()).padStart(2, "0");
+}
+
+function reqMsg(doctorId, text, type) {
+  const box = document.getElementById("rm-" + doctorId);
+  box.textContent = text;
+  box.className = "reqmsg " + type;
+}
+
+// Click once to open the request form, click again to close it
+function openRequestForm(doctorId) {
+  const box = document.getElementById("req-" + doctorId);
+  // If the form is open, close it. (If only the "request sent" message is showing, open a fresh form.)
+  if (box.querySelector("input")) { box.innerHTML = ""; return; }
+
+  const d = doctorsById[doctorId];
+  const today = new Date();
+  const last = new Date(); last.setDate(today.getDate() + 30);
+
+  box.innerHTML = `
+    <div class="reqform">
+      <b>Request an appointment with ${esc(d.name)}</b>
+      <label for="rn-${doctorId}">Your name</label>
+      <input id="rn-${doctorId}" maxlength="80" autocomplete="name">
+      <label for="rp-${doctorId}">Mobile number</label>
+      <input id="rp-${doctorId}" inputmode="tel" placeholder="10-digit mobile number" autocomplete="tel">
+      <label for="rd-${doctorId}">Preferred date (OPD days: ${d.opd_days.join(", ")})</label>
+      <input id="rd-${doctorId}" type="date" min="${ymd(today)}" max="${ymd(last)}">
+      <div class="docnote">This is a request, not a confirmed booking. The hospital will call you to confirm.
+        Your name and number are shared only with this hospital, to arrange the appointment.
+        Do not use this for emergencies: call 112 (or 108 for an ambulance).</div>
+      <button class="reqbtn" id="rb-${doctorId}" onclick="submitRequest(${doctorId})">Send request</button>
+      <div class="reqmsg" id="rm-${doctorId}"></div>
+    </div>`;
+}
+
+async function submitRequest(doctorId) {
+  const d = doctorsById[doctorId];
+  const name = document.getElementById("rn-" + doctorId).value.trim();
+  const phone = document.getElementById("rp-" + doctorId).value.trim();
+  const dateText = document.getElementById("rd-" + doctorId).value;
+
+  // Quick checks here, so the person gets instant feedback (the backend checks again)
+  if (name.length < 2) return reqMsg(doctorId, "Please enter your name.", "err");
+  if (!/^(\+91)?[6-9]\d{9}$/.test(phone.replace(/[ -]/g, ""))) return reqMsg(doctorId, "Please enter a valid 10-digit mobile number.", "err");
+  if (!dateText) return reqMsg(doctorId, "Please pick a date.", "err");
+
+  const [y, m, day] = dateText.split("-").map(Number);
+  const weekday = DAY_NAMES[new Date(y, m - 1, day).getDay()];
+  if (!d.opd_days.includes(weekday)) {
+    return reqMsg(doctorId, `This doctor has no OPD on ${weekday}. OPD days: ${d.opd_days.join(", ")}.`, "err");
+  }
+
+  const button = document.getElementById("rb-" + doctorId);
+  button.disabled = true;           // stops accidental double-clicks
+  button.textContent = "Sending...";
+
+  try {
+    const response = await fetch(`${API}/doctors/${doctorId}/appointments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ patient_name: name, patient_phone: phone, preferred_date: dateText }),
+    });
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      reqMsg(doctorId, formatError(data), "err");
+      button.disabled = false; button.textContent = "Send request";
+      return;
+    }
+    // Success: replace the form with a confirmation
+    document.getElementById("req-" + doctorId).innerHTML =
+      `<div class="reqform"><div class="reqmsg ok" style="display:block">${esc(data.message)}<br>
+       Doctor: ${esc(data.doctor)} · Date: ${esc(data.preferred_date)}</div></div>`;
+  } catch (e) {
+    reqMsg(doctorId, "Could not reach the server. Please try again.", "err");
+    button.disabled = false; button.textContent = "Send request";
+  }
+}
+
+// Click once to open the doctors list, click again to close it
+async function toggleDoctors(hospitalId) {
+  const box = document.getElementById("doctors-" + hospitalId);
+
+  if (box.dataset.open === "1") {
+    box.innerHTML = "";
+    box.dataset.open = "0";
+    return;
+  }
+
+  box.dataset.open = "1";
+  box.innerHTML = "<p class='muted'>Loading doctors...</p>";
+
+  try {
+    const response = await fetch(`${API}/hospitals/${hospitalId}/doctors`);
+    const doctors = await response.json();
+
+    if (doctors.length === 0) {
+      box.innerHTML = "<p class='muted'>No doctors listed for this hospital yet.</p>";
+      return;
+    }
+
+    doctors.forEach(d => { doctorsById[d.id] = d; });
+    box.innerHTML = doctors.map(d => {
+      const st = doctorStatus(d);
+      return `
+        <div class="doc">
+          <b>${esc(d.name)}</b>
+          <div class="spec">${esc(d.specialty)}</div>
+          <div class="status ${st.cls}">${st.text}</div>
+          ${d.on_leave
+            ? ""
+            : `<button class="reqbtn" onclick="openRequestForm(${d.id})">Request appointment</button>`}
+          <div id="req-${d.id}"></div>
+        </div>`;
+    }).join("") + `<div class="docnote">OPD timings can change. Please call the hospital to confirm before visiting.</div>`;
+
+  } catch (error) {
+    box.innerHTML = "<div class='error'>Could not load doctors. Is the backend running?</div>";
+  }
+}
+
+function drawChips() {
+  const chips = document.getElementById("chips");
+  const items = ["", ...allSpecialties];   // "" means "All"
+  chips.innerHTML = items.map(s => `
+    <span class="chip ${s === selectedSpecialty ? "active" : ""}" data-s="${s}">${s || "All"}</span>
+  `).join("");
+
+  chips.querySelectorAll(".chip").forEach(chip => {
+    chip.onclick = () => {
+      selectedSpecialty = chip.dataset.s;
+      drawChips();
+      loadHospitals();
+    };
+  });
+}
+
+// Reload the list whenever the user types in the search box
+document.getElementById("search").addEventListener("input", loadHospitals);
+
+// Load once when the page opens
+document.getElementById("viewList").onclick = () => setView("list");
+document.getElementById("viewMap").onclick = () => setView("map");
+document.getElementById("nearBtn").onclick = toggleNearMe;
+
+drawNeedChips();
+loadHospitals();
+</script>
+</body>
+</html>

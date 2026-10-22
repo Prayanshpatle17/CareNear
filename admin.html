@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CareNear Admin</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<style>
+  body{font-family:system-ui,sans-serif;background:#faf7f1;color:#1a2320;margin:0;}
+  header{padding:20px;background:#3a3a3a;color:#fff;}
+  header h1{margin:0 0 4px;font-size:1.5rem;}
+  header p{margin:0;opacity:.85;font-size:.9rem;}
+  .wrap{max-width:700px;margin:0 auto;padding:16px;}
+  .panel{background:#f1ece1;border:1px solid #d9d0be;border-radius:10px;padding:16px;margin-bottom:16px;}
+  h2{margin:0 0 12px;font-size:1.15rem;}
+  label{display:block;font-size:.85rem;color:#5e6863;margin:10px 0 4px;}
+  select,input[type=text],input[type=number],input[type=time]{width:100%;padding:10px;font-size:1rem;border:1px solid #d9d0be;border-radius:8px;box-sizing:border-box;background:#fff;}
+  .row{display:flex;gap:10px;}
+  .row > div{flex:1;}
+  button{padding:10px 16px;font-size:.95rem;border:none;border-radius:8px;background:#1b4b43;color:#fff;cursor:pointer;margin-top:14px;}
+  button.small{padding:6px 10px;font-size:.8rem;margin-top:0;background:transparent;color:#1b4b43;border:1px solid #1b4b43;}
+  button.small.danger{color:#c9483a;border-color:#c9483a;}
+  .days{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px;}
+  .days label{display:flex;align-items:center;gap:4px;margin:0;color:#1a2320;font-size:.9rem;}
+  .msg{margin-top:10px;padding:10px;border-radius:8px;font-size:.9rem;display:none;}
+  .msg.ok{display:block;background:#e3f1ec;border:1px solid #1b4b43;}
+  .msg.err{display:block;background:#fde8e5;border:1px solid #c9483a;}
+  .muted{color:#5e6863;font-size:.85rem;}
+  .doc{background:#faf7f1;border:1px solid #d9d0be;border-radius:8px;padding:10px;margin-top:8px;display:flex;justify-content:space-between;align-items:center;gap:10px;}
+  .doc b{display:block;}
+  .leave-tag{color:#c9483a;font-weight:600;font-size:.8rem;}
+  .badge{background:#c9483a;color:#fff;border-radius:999px;padding:2px 9px;font-size:.8rem;margin-left:6px;vertical-align:middle;}
+  .badge.zero{background:#1b4b43;}
+  #staleHours,#apptFilter{width:auto;display:inline-block;padding:4px 8px;font-size:.9rem;}
+  .doc a{color:#1b4b43;}
+  .actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;}
+  .stag{font-size:.7rem;font-weight:700;padding:2px 7px;border-radius:999px;margin-left:6px;vertical-align:middle;}
+  .stag.pending{background:#fff1d6;color:#b36b00;}
+  .stag.accepted{background:#e3f1ec;color:#1b4b43;}
+  .stag.declined{background:#ececec;color:#5e6863;}
+
+  #locMap{height:300px;border:1px solid #d9d0be;border-radius:10px;margin-top:10px;z-index:0;}
+  .pin{width:20px;height:20px;border-radius:50%;border:3px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.55);box-sizing:border-box;}
+  .pin.fresh{background:#1b4b43;}
+  .btnrow{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px;}
+  .btnrow button{margin-top:0;}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>CareNear Admin</h1>
+  <p>For hospital staff: update beds, manage doctors and handle appointment requests</p>
+</header>
+
+<div class="wrap">
+
+  <!-- Login: shown first. Nothing else is visible until the key is accepted. -->
+  <div class="panel" id="loginPanel">
+    <h2>Admin login</h2>
+    <p class="muted">Enter the admin key. It is saved in the file <b>admin_key.txt</b> next to main.py.</p>
+    <label for="adminKey">Admin key</label>
+    <input id="adminKey" type="password" placeholder="Paste your admin key" autocomplete="off">
+    <button id="unlock">Unlock</button>
+    <div id="loginMsg" class="msg"></div>
+  </div>
+
+  <div id="app" style="display:none;">
+
+  <!-- Stale-data dashboard -->
+  <div class="panel" id="stalePanel">
+    <button class="small" id="refreshStale" style="float:right;">Refresh</button>
+    <h2>Needs attention <span id="staleCount" class="badge zero">0</span></h2>
+    <p class="muted">Hospitals with no bed numbers, or numbers older than
+      <select id="staleHours">
+        <option value="1">1 hour</option>
+        <option value="2" selected>2 hours</option>
+        <option value="4">4 hours</option>
+        <option value="8">8 hours</option>
+      </select>
+    </p>
+    <div id="staleList"></div>
+    <div id="staleMsg" class="msg"></div>
+  </div>
+
+  <!-- Appointment requests -->
+  <div class="panel" id="apptPanel">
+    <button class="small" id="refreshAppts" style="float:right;">Refresh</button>
+    <h2>Appointment requests <span id="apptCount" class="badge zero">0</span></h2>
+    <p class="muted">Call the patient to confirm, then mark the request. Showing:
+      <select id="apptFilter">
+        <option value="pending" selected>Pending</option>
+        <option value="accepted">Accepted</option>
+        <option value="declined">Declined</option>
+        <option value="all">All</option>
+      </select>
+    </p>
+    <div id="apptList"></div>
+    <div id="apptMsg" class="msg"></div>
+  </div>
+
+  <div class="panel">
+    <button class="small" id="lock" style="float:right;">Lock</button>
+    <label for="hospital">Choose hospital</label>
+    <select id="hospital"></select>
+    <div id="globalMsg" class="msg"></div>
+  </div>
+
+  <!-- Beds -->
+  <div class="panel" id="bedsPanel" style="display:none;">
+    <h2>Bed availability</h2>
+    <div class="muted" id="lastUpdated"></div>
+    <div class="row">
+      <div><label for="general">General beds</label><input id="general" type="number" min="0"></div>
+      <div><label for="icu">ICU beds</label><input id="icu" type="number" min="0"></div>
+      <div><label for="vent">Ventilators</label><input id="vent" type="number" min="0"></div>
+    </div>
+    <button id="saveBeds">Save beds</button>
+    <div id="bedsMsg" class="msg"></div>
+  </div>
+
+  <!-- Hospital location (for the map) -->
+  <div class="panel" id="locPanel" style="display:none;">
+    <h2>Hospital location</h2>
+    <div class="muted" id="locStatus"></div>
+    <div id="locMap"></div>
+    <p class="muted">Click the map to place the pin, or type the coordinates below. Standing at the hospital? Use your current location.</p>
+    <div class="row">
+      <div><label for="lat">Latitude</label><input id="lat" type="number" step="any" placeholder="e.g. 23.8388"></div>
+      <div><label for="lng">Longitude</label><input id="lng" type="number" step="any" placeholder="e.g. 78.7378"></div>
+    </div>
+    <div class="btnrow">
+      <button class="small" id="useMyLoc">Use my current location</button>
+      <button id="saveLoc">Save location</button>
+    </div>
+    <div id="locMsg" class="msg"></div>
+  </div>
+
+  <!-- Doctors list -->
+  <div class="panel" id="doctorsPanel" style="display:none;">
+    <h2>Doctors</h2>
+    <div id="doctorList"></div>
+    <div id="leaveMsg" class="msg"></div>
+  </div>
+
+  <!-- Add doctor -->
+  <div class="panel" id="addPanel" style="display:none;">
+    <h2>Add a doctor</h2>
+    <label for="dName">Name</label>
+    <input id="dName" type="text" placeholder="Dr. Full Name">
+    <label for="dSpec">Specialty</label>
+    <input id="dSpec" type="text" placeholder="e.g. Cardiology">
+    <label>OPD days</label>
+    <div class="days" id="dDays"></div>
+    <div class="row">
+      <div><label for="dStart">OPD start</label><input id="dStart" type="time"></div>
+      <div><label for="dEnd">OPD end</label><input id="dEnd" type="time"></div>
+    </div>
+    <button id="addDoctor">Add doctor</button>
+    <div id="addMsg" class="msg"></div>
+  </div>
+
+  </div><!-- end #app -->
+
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+// If this page is opened from the backend (http://127.0.0.1:8000/admin) we use that same address.
+const API = location.protocol.startsWith("http") ? location.origin : "http://127.0.0.1:8000";
+const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+let hospitalId = null;   // which hospital is selected right now
+let allHospitals = [];   // the latest hospital list
+
+// The admin key. Kept in sessionStorage so a page refresh doesn't log you out,
+// but it is wiped when you close the tab.
+let adminKey = "";
+try { adminKey = sessionStorage.getItem("adminKey") || ""; } catch (e) {}
+
+function clearKey() {
+  adminKey = "";
+  try { sessionStorage.removeItem("adminKey"); } catch (e) {}
+}
+
+function showLogin(message) {
+  document.getElementById("app").style.display = "none";
+  document.getElementById("loginPanel").style.display = "block";
+  const box = document.getElementById("loginMsg");
+  if (message) showMsg("loginMsg", message, "err"); else box.className = "msg";
+}
+
+function showApp() {
+  document.getElementById("loginPanel").style.display = "none";
+  document.getElementById("app").style.display = "block";
+  init();
+}
+
+// ---------- Small helpers ----------
+
+// Makes text safe before putting it inside HTML (prevents broken layout or injected code)
+function esc(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// Turns the backend's error response into one readable sentence
+function formatError(data) {
+  if (!data) return "Something went wrong.";
+  if (typeof data.detail === "string") return data.detail;
+  if (Array.isArray(data.detail)) {
+    return data.detail.map(e => `${e.loc[e.loc.length - 1]}: ${e.msg}`).join("; ");
+  }
+  return "Something went wrong.";
+}
+
+// One function for all backend calls. Throws an Error if the backend says no.
+async function api(path, options) {
+  let response;
+  try {
+    response = await fetch(API + path, options);
+  } catch (e) {
+    throw new Error("Could not connect to the backend. Is uvicorn running?");
+  }
+  const data = await response.json().catch(() => null);
+  if (response.status === 401) {
+    // The backend rejected our key: forget it and go back to the login box
+    clearKey();
+    showLogin("That admin key was not accepted. Please try again.");
+    throw new Error("Not authorised.");
+  }
+  if (!response.ok) throw new Error(formatError(data));
+  return data;
+}
+
+// Shows a green (ok) or red (err) message inside the given box
+function showMsg(id, text, type) {
+  const box = document.getElementById(id);
+  box.textContent = text;
+  box.className = "msg " + type;
+}
+
+function jsonPut(body) {
+  return { method: "PUT", headers: { "Content-Type": "application/json", "X-Admin-Key": adminKey }, body: JSON.stringify(body) };
+}
+function jsonPost(body) {
+  return { method: "POST", headers: { "Content-Type": "application/json", "X-Admin-Key": adminKey }, body: JSON.stringify(body) };
+}
+
+// ---------- Load hospitals into the dropdown ----------
+async function init() {
+  // Build the day checkboxes for the "Add doctor" form
+  document.getElementById("dDays").innerHTML = DAYS.map(d =>
+    `<label><input type="checkbox" value="${d}"> ${d}</label>`
+  ).join("");
+
+  try {
+    const hospitals = await api("/hospitals");
+    allHospitals = hospitals;   // kept so the location map can start near the other hospitals
+    const select = document.getElementById("hospital");
+    select.innerHTML = hospitals.map(h => `<option value="${h.id}">${esc(h.name)}</option>`).join("");
+    select.onchange = () => selectHospital(Number(select.value));
+    if (hospitals.length > 0) selectHospital(hospitals[0].id);
+    loadStale();
+    loadAppts();
+  } catch (e) {
+    showMsg("globalMsg", e.message, "err");
+  }
+}
+
+async function selectHospital(id) {
+  hospitalId = id;
+  ["bedsMsg", "leaveMsg", "addMsg", "globalMsg", "locMsg"].forEach(m => document.getElementById(m).className = "msg");
+  try {
+    const h = await api("/hospitals/" + id);
+
+    // Fill the bed boxes. If never updated, leave them empty so staff must type real numbers.
+    const never = !h.beds.last_updated;
+    document.getElementById("general").value = never ? "" : h.beds.general;
+    document.getElementById("icu").value = never ? "" : h.beds.icu;
+    document.getElementById("vent").value = never ? "" : h.beds.ventilator;
+    document.getElementById("lastUpdated").textContent = never
+      ? "Beds have never been updated for this hospital."
+      : "Last updated: " + new Date(h.beds.last_updated).toLocaleString();
+
+    ["bedsPanel", "locPanel", "doctorsPanel", "addPanel"].forEach(p => document.getElementById(p).style.display = "block");
+    showLocation(h);   // the panel is visible now, so the map can measure itself
+    await loadDoctors();
+  } catch (e) {
+    showMsg("globalMsg", e.message, "err");
+  }
+}
+
+// ---------- Stale-data dashboard ----------
+
+// Turns minutes into words, e.g. 300 -> "5 hr ago"
+function agoText(minutes) {
+  if (minutes === null) return "Never updated";
+  if (minutes < 60) return `Updated ${minutes} min ago`;
+  if (minutes < 1440) return `Updated ${Math.floor(minutes / 60)} hr ago`;
+  return `Updated ${Math.floor(minutes / 1440)} day(s) ago`;
+}
+
+async function loadStale() {
+  const list = document.getElementById("staleList");
+  const badge = document.getElementById("staleCount");
+  const hours = document.getElementById("staleHours").value;
+  document.getElementById("staleMsg").className = "msg";
+
+  try {
+    const items = await api(`/admin/stale?hours=${hours}`, { headers: { "X-Admin-Key": adminKey } });
+
+    badge.textContent = items.length;
+    badge.className = "badge" + (items.length === 0 ? " zero" : "");
+
+    if (items.length === 0) {
+      list.innerHTML = "<p class='muted'>No hospital is overdue for an update.</p>";
+      return;
+    }
+
+    list.innerHTML = items.map(h => `
+      <div class="doc">
+        <div>
+          <b>${esc(h.name)}</b>
+          <span class="muted">${esc(h.area)} · ${agoText(h.minutes_since_update)} ·
+            <a href="tel:${esc(h.phone)}">${esc(h.phone)}</a></span>
+        </div>
+        <button class="small" onclick="goUpdate(${h.id})">Update beds</button>
+      </div>`).join("");
+  } catch (e) {
+    list.innerHTML = "";
+    if (e.message !== "Not authorised.") showMsg("staleMsg", e.message, "err");
+  }
+}
+
+// "Update beds" button: jump to that hospital's bed form
+async function goUpdate(id) {
+  document.getElementById("hospital").value = String(id);
+  await selectHospital(id);
+  document.getElementById("bedsPanel").scrollIntoView({ behavior: "smooth" });
+}
+
+document.getElementById("refreshStale").onclick = loadStale;
+document.getElementById("staleHours").onchange = loadStale;
+
+// ---------- Appointment requests ----------
+let allAppts = [];   // every request, loaded from the backend; the dropdown filters it here
+
+// "2026-10-15" -> "Thu, 15 Oct 2026" (built from parts so the timezone can't shift the day)
+function niceDate(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+}
+
+function requestedAgo(createdAt) {
+  const minutes = Math.floor((Date.now() - new Date(createdAt)) / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 1440) return `${Math.floor(minutes / 60)} hr ago`;
+  return `${Math.floor(minutes / 1440)} day(s) ago`;
+}
+
+function renderAppts() {
+  const filter = document.getElementById("apptFilter").value;
+  const badge = document.getElementById("apptCount");
+  const list = document.getElementById("apptList");
+
+  // The badge always counts pending requests, whatever the dropdown shows
+  const pending = allAppts.filter(a => a.status === "pending").length;
+  badge.textContent = pending;
+  badge.className = "badge" + (pending === 0 ? " zero" : "");
+
+  const items = filter === "all" ? allAppts : allAppts.filter(a => a.status === filter);
+  if (items.length === 0) {
+    list.innerHTML = `<p class='muted'>No ${filter === "all" ? "" : filter + " "}requests.</p>`;
+    return;
+  }
+
+  list.innerHTML = items.map(a => `
+    <div class="doc">
+      <div>
+        <b>${esc(a.patient_name)} <span class="stag ${a.status}">${a.status.toUpperCase()}</span></b>
+        <span class="muted">
+          <a href="tel:${esc(a.patient_phone)}">${esc(a.patient_phone)}</a> ·
+          ${esc(a.doctor_name)} (${esc(a.specialty)}), ${esc(a.hospital_name)}<br>
+          For <b>${niceDate(a.preferred_date)}</b> · requested ${requestedAgo(a.created_at)}
+        </span>
+      </div>
+      <div class="actions">
+        ${a.status === "pending"
+          ? `<button class="small" onclick="setApptStatus(${a.id}, 'accepted')">Accept</button>
+             <button class="small danger" onclick="setApptStatus(${a.id}, 'declined')">Decline</button>`
+          : `<button class="small" onclick="setApptStatus(${a.id}, 'pending')">Back to pending</button>`}
+        <button class="small danger" onclick="deleteAppt(${a.id})">Delete</button>
+      </div>
+    </div>`).join("");
+}
+
+async function loadAppts() {
+  document.getElementById("apptMsg").className = "msg";
+  try {
+    allAppts = await api("/admin/appointments", { headers: { "X-Admin-Key": adminKey } });
+    renderAppts();
+  } catch (e) {
+    if (e.message !== "Not authorised.") showMsg("apptMsg", e.message, "err");
+  }
+}
+
+async function setApptStatus(id, status) {
+  try {
+    await api(`/admin/appointments/${id}`, jsonPut({ status }));
+    await loadAppts();
+  } catch (e) {
+    if (e.message !== "Not authorised.") showMsg("apptMsg", e.message, "err");
+  }
+}
+
+async function deleteAppt(id) {
+  // Patient details are personal data, so deleting is permanent and asks first
+  if (!confirm("Delete this request permanently? This cannot be undone.")) return;
+  try {
+    await api(`/admin/appointments/${id}`, { method: "DELETE", headers: { "X-Admin-Key": adminKey } });
+    await loadAppts();
+  } catch (e) {
+    if (e.message !== "Not authorised.") showMsg("apptMsg", e.message, "err");
+  }
+}
+
+document.getElementById("refreshAppts").onclick = loadAppts;
+document.getElementById("apptFilter").onchange = renderAppts;
+
+// ---------- Hospital location ----------
+let locMap = null, locMarker = null;
+const hasLoc = h => h.latitude != null && h.longitude != null;
+
+function setLocMarker(lat, lng, zoomIn) {
+  if (!locMap) return;
+  if (!locMarker) {
+    locMarker = L.marker([lat, lng], { icon: L.divIcon({ className: "", html: "<div class='pin fresh'></div>", iconSize: [20, 20], iconAnchor: [10, 10] }) }).addTo(locMap);
+  } else {
+    locMarker.setLatLng([lat, lng]);
+  }
+  if (zoomIn) locMap.setView([lat, lng], 16);
+}
+
+// Creates the map the first time it is needed
+function initLocMap() {
+  if (locMap) return;
+  if (typeof L === "undefined") {
+    document.getElementById("locMap").innerHTML = "<div class='msg err' style='display:block'>The map could not be loaded. You can still type the coordinates below.</div>";
+    return;
+  }
+  locMap = L.map("locMap").setView([22.9734, 78.6569], 5);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "&copy; OpenStreetMap contributors" }).addTo(locMap);
+  locMap.on("click", e => {   // clicking the map fills in the boxes and moves the pin
+    document.getElementById("lat").value = e.latlng.lat.toFixed(6);
+    document.getElementById("lng").value = e.latlng.lng.toFixed(6);
+    setLocMarker(e.latlng.lat, e.latlng.lng, false);
+  });
+}
+
+// Called when a hospital is selected
+function showLocation(h) {
+  initLocMap();
+  const has = hasLoc(h);
+  document.getElementById("lat").value = has ? h.latitude : "";
+  document.getElementById("lng").value = has ? h.longitude : "";
+  document.getElementById("locStatus").textContent = has
+    ? `Saved location: ${h.latitude}, ${h.longitude}`
+    : "No location saved yet. This hospital will not appear on the public map until you save one.";
+  if (!locMap) return;
+
+  locMap.invalidateSize();
+  if (has) {
+    setLocMarker(h.latitude, h.longitude, true);
+  } else {
+    if (locMarker) { locMap.removeLayer(locMarker); locMarker = null; }
+    // Start the view near the other hospitals, so the right city is already on screen
+    const others = allHospitals.filter(hasLoc).map(x => [x.latitude, x.longitude]);
+    if (others.length) locMap.fitBounds(L.latLngBounds(others).pad(0.3), { maxZoom: 13 });
+  }
+}
+
+// Typing coordinates moves the pin too (a quick way to check them)
+["lat", "lng"].forEach(id => document.getElementById(id).addEventListener("change", () => {
+  const la = parseFloat(document.getElementById("lat").value), ln = parseFloat(document.getElementById("lng").value);
+  if (Number.isFinite(la) && Number.isFinite(ln) && Math.abs(la) <= 90 && Math.abs(ln) <= 180) setLocMarker(la, ln, true);
+}));
+
+document.getElementById("useMyLoc").onclick = () => {
+  if (!navigator.geolocation) { showMsg("locMsg", "Your browser does not support location.", "err"); return; }
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      document.getElementById("lat").value = pos.coords.latitude.toFixed(6);
+      document.getElementById("lng").value = pos.coords.longitude.toFixed(6);
+      setLocMarker(pos.coords.latitude, pos.coords.longitude, true);
+      showMsg("locMsg", `Location found (accuracy about ${Math.round(pos.coords.accuracy)} m). Check the pin, then press Save location.`, "ok");
+    },
+    err => showMsg("locMsg", err.code === 1
+      ? "Location permission was denied. You can allow it in your browser's site settings."
+      : "Could not get your location. Please try again.", "err"),
+    { enableHighAccuracy: true, timeout: 15000 }
+  );
+};
+
+document.getElementById("saveLoc").onclick = async () => {
+  const latText = document.getElementById("lat").value.trim();
+  const lngText = document.getElementById("lng").value.trim();
+  const la = Number(latText), ln = Number(lngText);
+
+  if (latText === "" || lngText === "" || !Number.isFinite(la) || !Number.isFinite(ln)) {
+    showMsg("locMsg", "Please enter both latitude and longitude as numbers.", "err"); return;
+  }
+  if (la < -90 || la > 90 || ln < -180 || ln > 180) {
+    showMsg("locMsg", "Latitude must be between -90 and 90, and longitude between -180 and 180.", "err"); return;
+  }
+
+  try {
+    await api(`/hospitals/${hospitalId}/location`, jsonPut({ latitude: la, longitude: ln }));
+    showMsg("locMsg", "Location saved. This hospital now appears on the public map.", "ok");
+    document.getElementById("locStatus").textContent = `Saved location: ${la}, ${ln}`;
+    setLocMarker(la, ln, true);
+    const known = allHospitals.find(x => x.id === hospitalId);
+    if (known) { known.latitude = la; known.longitude = ln; }
+  } catch (e) {
+    if (e.message !== "Not authorised.") showMsg("locMsg", e.message, "err");
+  }
+};
+
+// ---------- Beds ----------
+document.getElementById("saveBeds").onclick = async () => {
+  const g = document.getElementById("general").value;
+  const i = document.getElementById("icu").value;
+  const v = document.getElementById("vent").value;
+
+  // All three boxes must be filled, otherwise we'd save wrong zeros
+  if (g === "" || i === "" || v === "") {
+    showMsg("bedsMsg", "Please fill in all three bed counts (use 0 if none are available).", "err");
+    return;
+  }
+
+  try {
+    await api(`/hospitals/${hospitalId}/beds`, jsonPut({
+      general_available: Number(g),
+      icu_available: Number(i),
+      ventilator_available: Number(v),
+    }));
+    showMsg("bedsMsg", "Beds saved. The public page will now show these numbers.", "ok");
+    loadStale();
+    document.getElementById("lastUpdated").textContent = "Last updated: " + new Date().toLocaleString();
+  } catch (e) {
+    showMsg("bedsMsg", e.message, "err");
+  }
+};
+
+// ---------- Doctors ----------
+async function loadDoctors() {
+  const list = document.getElementById("doctorList");
+  try {
+    const doctors = await api(`/hospitals/${hospitalId}/doctors`);
+    if (doctors.length === 0) {
+      list.innerHTML = "<p class='muted'>No doctors added yet.</p>";
+      return;
+    }
+    list.innerHTML = doctors.map(d => `
+      <div class="doc">
+        <div>
+          <b>${esc(d.name)} ${d.on_leave ? "<span class='leave-tag'>ON LEAVE</span>" : ""}</b>
+          <span class="muted">${esc(d.specialty)} · ${d.opd_days.join(", ")} · ${d.opd_start}–${d.opd_end}</span>
+        </div>
+        <button class="small ${d.on_leave ? "" : "danger"}" onclick="toggleLeave(${d.id}, ${!d.on_leave})">
+          ${d.on_leave ? "Mark back at work" : "Mark on leave"}
+        </button>
+      </div>`).join("");
+  } catch (e) {
+    list.innerHTML = "";
+    showMsg("leaveMsg", e.message, "err");
+  }
+}
+
+async function toggleLeave(doctorId, onLeave) {
+  try {
+    await api(`/doctors/${doctorId}/leave`, jsonPut({ on_leave: onLeave }));
+    await loadDoctors();
+  } catch (e) {
+    showMsg("leaveMsg", e.message, "err");
+  }
+}
+
+document.getElementById("addDoctor").onclick = async () => {
+  const days = [...document.querySelectorAll("#dDays input:checked")].map(c => c.value);
+  const body = {
+    name: document.getElementById("dName").value.trim(),
+    specialty: document.getElementById("dSpec").value.trim(),
+    opd_days: days,
+    opd_start: document.getElementById("dStart").value,
+    opd_end: document.getElementById("dEnd").value,
+  };
+
+  if (!body.name || !body.specialty || days.length === 0 || !body.opd_start || !body.opd_end) {
+    showMsg("addMsg", "Please fill in every field and pick at least one OPD day.", "err");
+    return;
+  }
+
+  try {
+    await api(`/hospitals/${hospitalId}/doctors`, jsonPost(body));
+    showMsg("addMsg", "Doctor added.", "ok");
+    // Clear the form
+    document.getElementById("dName").value = "";
+    document.getElementById("dSpec").value = "";
+    document.getElementById("dStart").value = "";
+    document.getElementById("dEnd").value = "";
+    document.querySelectorAll("#dDays input").forEach(c => c.checked = false);
+    await loadDoctors();
+  } catch (e) {
+    showMsg("addMsg", e.message, "err");
+  }
+};
+
+// ---------- Login / lock ----------
+async function tryUnlock() {
+  const key = document.getElementById("adminKey").value.trim();
+  if (!key) { showMsg("loginMsg", "Please paste your admin key.", "err"); return; }
+  try {
+    await api("/admin/check", { headers: { "X-Admin-Key": key } });   // 200 = key is correct
+    adminKey = key;
+    try { sessionStorage.setItem("adminKey", key); } catch (e) {}
+    document.getElementById("adminKey").value = "";
+    showApp();
+  } catch (e) {
+    if (e.message !== "Not authorised.") showMsg("loginMsg", e.message, "err");
+  }
+}
+document.getElementById("unlock").onclick = tryUnlock;
+document.getElementById("adminKey").addEventListener("keydown", e => { if (e.key === "Enter") tryUnlock(); });
+
+document.getElementById("lock").onclick = () => { clearKey(); showLogin(); };
+
+// Check for new appointment requests every minute (only while unlocked)
+setInterval(() => {
+  if (adminKey && document.getElementById("app").style.display !== "none") loadAppts();
+}, 60000);
+
+// On page load: if a key was saved in this tab, check it is still valid; otherwise show the login box
+(async function start() {
+  if (!adminKey) { showLogin(); return; }
+  try {
+    await api("/admin/check", { headers: { "X-Admin-Key": adminKey } });
+    showApp();
+  } catch (e) {
+    if (e.message !== "Not authorised.") showLogin(e.message);
+  }
+})();
+</script>
+</body>
+</html>

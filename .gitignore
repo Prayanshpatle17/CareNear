@@ -1,0 +1,17 @@
+# Secrets and local data: never commit these
+admin_key.txt
+.env
+*.db
+*.sqlite3
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Logs and editor/OS files
+*.log
+.vscode/
+.idea/
+.DS_Store
